@@ -6,7 +6,6 @@ from threading import Thread
 
 from flask import Flask
 
-import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
 
 from aiogram import Bot, Dispatcher
@@ -61,6 +60,17 @@ dp = Dispatcher()
 
 
 # =========================================================
+# НАСТРОЙКИ
+# =========================================================
+
+COOLDOWN = 3600
+
+# История хранится 48 часов.
+# /top_day использует только последние 24 часа.
+HISTORY_RETENTION = 48 * 3600
+
+
+# =========================================================
 # ПОДКЛЮЧЕНИЕ К POSTGRESQL
 # =========================================================
 
@@ -72,7 +82,7 @@ db_pool = ThreadedConnectionPool(
 
 
 # =========================================================
-# СОЗДАНИЕ ТАБЛИЦ
+# СОЗДАНИЕ / НАСТРОЙКА ТАБЛИЦ
 # =========================================================
 
 def init_database():
@@ -80,16 +90,35 @@ def init_database():
     conn = db_pool.getconn()
 
     try:
+
         with conn.cursor() as cursor:
+
+            # -------------------------------------------------
+            # USERS
+            # -------------------------------------------------
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
                     username TEXT,
                     total_potatoes DOUBLE PRECISION DEFAULT 0,
+                    total_digs BIGINT DEFAULT 0,
                     last_dig BIGINT DEFAULT 0
                 )
             """)
+
+            # Если таблица users уже существовала до появления
+            # total_digs — добавляем колонку.
+
+            cursor.execute("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS total_digs
+                BIGINT DEFAULT 0
+            """)
+
+            # -------------------------------------------------
+            # DIG HISTORY
+            # -------------------------------------------------
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS dig_history (
@@ -100,26 +129,112 @@ def init_database():
                 )
             """)
 
-            # Индекс ускоряет поиск копок за последние 24 часа
+            # -------------------------------------------------
+            # ИНДЕКСЫ
+            # -------------------------------------------------
+
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_dig_history_timestamp
+                CREATE INDEX IF NOT EXISTS
+                idx_dig_history_timestamp
                 ON dig_history(timestamp)
             """)
 
-            # Индекс ускоряет поиск истории конкретного игрока
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_dig_history_user_id
+                CREATE INDEX IF NOT EXISTS
+                idx_dig_history_user_id
                 ON dig_history(user_id)
+            """)
+
+            # Индекс для запросов вида:
+            #
+            # user_id = ...
+            # timestamp >= ...
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS
+                idx_dig_history_user_timestamp
+                ON dig_history(user_id, timestamp)
             """)
 
         conn.commit()
 
     except Exception:
+
         conn.rollback()
         raise
 
     finally:
+
         db_pool.putconn(conn)
+
+
+# =========================================================
+# ОЧИСТКА СТАРОЙ ИСТОРИИ
+# =========================================================
+
+def cleanup_old_history():
+
+    conn = db_pool.getconn()
+
+    try:
+
+        cutoff = int(time.time()) - HISTORY_RETENTION
+
+        with conn.cursor() as cursor:
+
+            cursor.execute("""
+                DELETE FROM dig_history
+                WHERE timestamp < %s
+            """, (cutoff,))
+
+            deleted = cursor.rowcount
+
+        conn.commit()
+
+        if deleted > 0:
+
+            print(
+                f"🧹 Удалено старых записей истории: {deleted}"
+            )
+
+    except Exception as e:
+
+        conn.rollback()
+
+        print(
+            f"⚠️ Ошибка очистки старой истории: {e}"
+        )
+
+    finally:
+
+        db_pool.putconn(conn)
+
+
+# =========================================================
+# ФОНОВАЯ ОЧИСТКА
+# =========================================================
+
+async def history_cleanup_loop():
+
+    while True:
+
+        try:
+
+            # Проверяем историю раз в час.
+
+            await asyncio.sleep(3600)
+
+            cleanup_old_history()
+
+        except asyncio.CancelledError:
+
+            break
+
+        except Exception as e:
+
+            print(
+                f"⚠️ Ошибка фоновой очистки: {e}"
+            )
 
 
 # =========================================================
@@ -127,7 +242,6 @@ def init_database():
 # =========================================================
 
 def format_time(seconds):
-    """Красиво показывает оставшееся время."""
 
     minutes = seconds // 60
     hours = minutes // 60
@@ -140,10 +254,14 @@ def format_time(seconds):
 
 
 # =========================================================
-# ОТПРАВКА ТАБЛИЦЫ ЛИДЕРОВ
+# ТАБЛИЦА ЛИДЕРОВ
 # =========================================================
 
-async def send_top_list(message: Message, rows: list, title: str):
+async def send_top_list(
+    message: Message,
+    rows: list,
+    title: str
+):
 
     if not rows:
 
@@ -230,12 +348,19 @@ async def dig_potato(message: Message):
 
         with conn.cursor() as cursor:
 
-            # Получаем игрока
+            # -------------------------------------------------
+            # ПОЛУЧАЕМ И БЛОКИРУЕМ ИГРОКА
+            # -------------------------------------------------
+
             cursor.execute(
                 """
-                SELECT total_potatoes, last_dig
+                SELECT
+                    total_potatoes,
+                    total_digs,
+                    last_dig
                 FROM users
                 WHERE user_id = %s
+                FOR UPDATE
                 """,
                 (user_id,)
             )
@@ -248,7 +373,7 @@ async def dig_potato(message: Message):
 
             if row:
 
-                total_potatoes, last_dig = row
+                total_potatoes, total_digs, last_dig = row
 
                 time_passed = current_time - last_dig
 
@@ -266,7 +391,9 @@ async def dig_potato(message: Message):
                     return
 
             else:
+
                 total_potatoes = 0
+                total_digs = 0
 
             # -------------------------------------------------
             # КОПАЕМ
@@ -282,30 +409,56 @@ async def dig_potato(message: Message):
                 1
             )
 
+            new_total_digs = total_digs + 1
+
             # -------------------------------------------------
             # СОХРАНЯЕМ ИГРОКА
             # -------------------------------------------------
 
-            cursor.execute(
-                """
-                INSERT INTO users
-                    (user_id, username, total_potatoes, last_dig)
-                VALUES
-                    (%s, %s, %s, %s)
+            if row:
 
-                ON CONFLICT (user_id)
-                DO UPDATE SET
-                    username = EXCLUDED.username,
-                    total_potatoes = EXCLUDED.total_potatoes,
-                    last_dig = EXCLUDED.last_dig
-                """,
-                (
-                    user_id,
-                    username,
-                    new_total,
-                    current_time
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET
+                        username = %s,
+                        total_potatoes = %s,
+                        total_digs = %s,
+                        last_dig = %s
+                    WHERE user_id = %s
+                    """,
+                    (
+                        username,
+                        new_total,
+                        new_total_digs,
+                        current_time,
+                        user_id
+                    )
                 )
-            )
+
+            else:
+
+                cursor.execute(
+                    """
+                    INSERT INTO users
+                        (
+                            user_id,
+                            username,
+                            total_potatoes,
+                            total_digs,
+                            last_dig
+                        )
+                    VALUES
+                        (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        user_id,
+                        username,
+                        mined,
+                        1,
+                        current_time
+                    )
+                )
 
             # -------------------------------------------------
             # СОХРАНЯЕМ ИСТОРИЮ
@@ -314,7 +467,11 @@ async def dig_potato(message: Message):
             cursor.execute(
                 """
                 INSERT INTO dig_history
-                    (user_id, amount, timestamp)
+                    (
+                        user_id,
+                        amount,
+                        timestamp
+                    )
                 VALUES
                     (%s, %s, %s)
                 """,
@@ -327,9 +484,14 @@ async def dig_potato(message: Message):
 
         conn.commit()
 
-    except Exception:
+    except Exception as e:
 
         conn.rollback()
+
+        print(
+            f"❌ Ошибка при копке пользователя "
+            f"{user_id}: {e}"
+        )
 
         await message.reply(
             "❌ Произошла ошибка при сохранении копки.\n"
@@ -343,7 +505,7 @@ async def dig_potato(message: Message):
         db_pool.putconn(conn)
 
     # ---------------------------------------------------------
-    # ОТВЕТ ИГРОКУ
+    # ОТВЕТ
     # ---------------------------------------------------------
 
     await message.reply(
@@ -385,7 +547,9 @@ async def show_top_day(message: Message):
 
                 WHERE h.timestamp >= %s
 
-                GROUP BY h.user_id, u.username
+                GROUP BY
+                    h.user_id,
+                    u.username
 
                 ORDER BY day_total DESC
 
@@ -395,6 +559,19 @@ async def show_top_day(message: Message):
             )
 
             rows = cursor.fetchall()
+
+    except Exception as e:
+
+        print(
+            f"❌ Ошибка /top_day: {e}"
+        )
+
+        await message.reply(
+            "❌ Не удалось получить топ.\n"
+            "Попробуй ещё раз."
+        )
+
+        return
 
     finally:
 
@@ -436,6 +613,19 @@ async def show_top_all(message: Message):
 
             rows = cursor.fetchall()
 
+    except Exception as e:
+
+        print(
+            f"❌ Ошибка /top_all: {e}"
+        )
+
+        await message.reply(
+            "❌ Не удалось получить топ.\n"
+            "Попробуй ещё раз."
+        )
+
+        return
+
     finally:
 
         db_pool.putconn(conn)
@@ -471,6 +661,7 @@ async def show_stats(message: Message):
                 SELECT
                     username,
                     total_potatoes,
+                    total_digs,
                     last_dig
 
                 FROM users
@@ -493,22 +684,7 @@ async def show_stats(message: Message):
 
                 return
 
-            username, total_potatoes, last_dig = row
-
-            # -------------------------------------------------
-            # КОЛИЧЕСТВО КОПОК
-            # -------------------------------------------------
-
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM dig_history
-                WHERE user_id = %s
-                """,
-                (user_id,)
-            )
-
-            digs = cursor.fetchone()[0]
+            username, total_potatoes, total_digs, last_dig = row
 
             # -------------------------------------------------
             # КАРТОШКА ЗА 24 ЧАСА
@@ -518,7 +694,8 @@ async def show_stats(message: Message):
 
             cursor.execute(
                 """
-                SELECT COALESCE(SUM(amount), 0)
+                SELECT
+                    COALESCE(SUM(amount), 0)
 
                 FROM dig_history
 
@@ -533,6 +710,19 @@ async def show_stats(message: Message):
 
             today = cursor.fetchone()[0]
 
+    except Exception as e:
+
+        print(
+            f"❌ Ошибка /stats: {e}"
+        )
+
+        await message.reply(
+            "❌ Не удалось получить статистику.\n"
+            "Попробуй ещё раз."
+        )
+
+        return
+
     finally:
 
         db_pool.putconn(conn)
@@ -545,6 +735,7 @@ async def show_stats(message: Message):
         "📊 <b>Твоя статистика</b>\n\n"
 
         f"👨‍🌾 Фермер: <b>{username}</b>\n"
+
         f"🥔 Всего картошки: "
         f"<b>{total_potatoes:.1f} кг</b>\n"
 
@@ -552,7 +743,7 @@ async def show_stats(message: Message):
         f"<b>{today:.1f} кг</b>\n"
 
         f"⛏ Всего копок: "
-        f"<b>{digs}</b>\n"
+        f"<b>{total_digs}</b>\n"
     )
 
     await message.reply(
@@ -599,13 +790,6 @@ async def set_commands():
 
 
 # =========================================================
-# COOLDOWN
-# =========================================================
-
-COOLDOWN = 3600
-
-
-# =========================================================
 # ЗАПУСК
 # =========================================================
 
@@ -613,16 +797,43 @@ async def main():
 
     print("🥔 Запуск картофельного бота...")
 
-    # Создаём таблицы, если их ещё нет
+    # ---------------------------------------------------------
+    # DATABASE
+    # ---------------------------------------------------------
+
     init_database()
 
     print("✅ PostgreSQL подключён!")
     print("✅ Таблицы проверены!")
 
-    # Устанавливаем меню команд
+    # ---------------------------------------------------------
+    # ПЕРВАЯ ОЧИСТКА
+    # ---------------------------------------------------------
+
+    cleanup_old_history()
+
+    print("🧹 Старая история проверена!")
+
+    # ---------------------------------------------------------
+    # TELEGRAM COMMANDS
+    # ---------------------------------------------------------
+
     await set_commands()
 
     print("✅ Команды Telegram установлены!")
+
+    # ---------------------------------------------------------
+    # ФОНОВАЯ ОЧИСТКА
+    # ---------------------------------------------------------
+
+    cleanup_task = asyncio.create_task(
+        history_cleanup_loop()
+    )
+
+    print(
+        "🧹 Автоматическая очистка истории запущена!"
+    )
+
     print("🚜 Бот запущен!")
 
     try:
@@ -631,8 +842,18 @@ async def main():
 
     finally:
 
-        # Закрываем соединения PostgreSQL
+        cleanup_task.cancel()
+
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+
         db_pool.closeall()
+
+        print(
+            "🔌 Соединения PostgreSQL закрыты."
+        )
 
 
 # =========================================================
