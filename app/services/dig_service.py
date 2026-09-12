@@ -7,7 +7,7 @@ from app.exceptions import CooldownError
 from app.config import get_settings
 from app.utils.logging import get_logger
 from app.utils.validators import validate_dig_amount
-from app.services import get_redis
+from app.services import get_redis, get_clan_service
 
 logger = get_logger(__name__)
 
@@ -66,6 +66,10 @@ class DigService:
         await redis.increment_counter("dig_kg_total", value=int(kg * 10))  # Store as int * 10
 
         logger.info("dig_performed", user_id=user.user_id, kg=kg, dig_id=dig_id)
+
+        # Add clan contribution
+        clan_service = get_clan_service(self.db)
+        await clan_service.add_contribution(user.user_id, kg)
 
         # Get digs count for achievements
         async with self.db.acquire() as conn:

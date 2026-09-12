@@ -21,8 +21,10 @@ from app.services import (
     get_daily_bonus_service,
     get_achievement_service,
     get_metrics_service,
+    get_clan_service,
+    get_ml_service,
 )
-from app.handlers import basic_router, dig_router, stats_router, webapp_router, inline_router
+from app.handlers import basic_router, dig_router, stats_router, webapp_router, inline_router, clan_router, ml_recommendations_router, chaos_router
 from app.middleware import RateLimitMiddleware, ErrorHandlingMiddleware, LoggingMiddleware
 from app.web import create_web_app, run_web_server
 from app.utils.logging import setup_logging, get_logger
@@ -87,6 +89,10 @@ async def main():
     metrics_service = get_metrics_service(db)
     await metrics_service.start()
 
+clan_service = get_clan_service(db)
+
+    ml_service = get_ml_service(db)
+
     daily_bonus_service = get_daily_bonus_service()
     daily_bonus_service.db = db  # Inject db
 
@@ -101,15 +107,14 @@ async def main():
     bot.dig_service = dig_service
     bot.daily_bonus_service = daily_bonus_service
     bot.achievement_service = achievement_service
+    bot.clan_service = clan_service
+    bot.ml_service = ml_service
     bot.settings = settings
     bot.admin_ids = settings.admin_ids
 
     dp = Dispatcher()
 
     # Register middlewares (order matters!)
-    dp.message.middleware(LoggingMiddleware())
-    dp.message.middleware(RateLimitMiddleware())
-    dp.message.middleware(ErrorHandlingMiddleware())
 
     # Register handlers
     dp.include_router(basic_router)
@@ -117,6 +122,9 @@ async def main():
     dp.include_router(stats_router)
     dp.include_router(webapp_router)
     dp.include_router(inline_router)
+    dp.include_router(clan_router)
+    dp.include_router(ml_recommendations_router)
+    dp.include_router(chaos_router)
 
     # Set bot commands
     await bot.set_my_commands([
@@ -129,6 +137,12 @@ async def main():
         ("daily", "🎁 Ежедневный бонус"),
         ("achievements", "🏅 Достижения"),
         ("app", "🌐 Веб-приложение"),
+        ("clan", "🏷 Мой клан"),
+        ("clan_create", "🏷 Создать клан"),
+        ("clan_invite", "📨 Пригласить в клан"),
+        ("clan_invites", "📨 Входящие приглашения"),
+        ("clan_top", "🏆 Топ кланов"),
+        ("clan_transfer", "👑 Передать владение кланом"),
         ("help", "❓ Помощь"),
     ])
 
