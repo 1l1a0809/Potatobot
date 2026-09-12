@@ -1,0 +1,16 @@
+apiVersion: v2
+name: potatobot
+description: A Helm chart for Potatobot - Telegram potato farming bot
+type: application
+version: 2.1.0
+appVersion: "2.1.0"
+keywords:
+  - telegram
+  - bot
+  - potato
+  - game
+maintainers:
+  - name: Potatobot Team
+    email: team@potatobot.app
+sources:
+  - https://github.com/1l1a0809/Potatobot

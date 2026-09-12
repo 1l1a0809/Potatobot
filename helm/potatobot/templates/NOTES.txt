@@ -1,0 +1,62 @@
+Thank you for installing potatobot!
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+## Configuration
+
+The following secrets need to be configured:
+
+1. **Bot Token**: Create a secret with your Telegram bot token
+   ```bash
+   kubectl create secret generic {{ include "potatobot.fullname" . }}-secrets \
+     --from-literal=bot-token="YOUR_BOT_TOKEN" \
+     --from-literal=database-url="postgresql://user:pass@host:5432/db" \
+     --from-literal=admin-user-ids="123456789,987654321" \
+     --from-literal=admin-session-secret="$(openssl rand -hex 32)"
+   ```
+
+2. **Database**: The chart includes a PostgreSQL subchart. Configure the password:
+   ```bash
+   kubectl create secret generic {{ include "potatobot.fullname" . }}-postgres \
+     --from-literal=postgres-password="YOUR_PASSWORD"
+   ```
+
+## Accessing the Application
+
+### Local Access
+```bash
+kubectl port-forward svc/{{ include "potatobot.fullname" . }} 8080:8080
+```
+
+Then visit http://localhost:8080/health
+
+### Ingress
+If ingress is enabled, the application will be available at:
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}
+{{- end }}
+
+## Monitoring
+
+Prometheus metrics are available at `/metrics`.
+Grafana dashboard can be imported from `monitoring/grafana/dashboards/potatobot.json`.
+
+## Logs
+
+```bash
+kubectl logs -f deployment/{{ include "potatobot.fullname" . }}
+```
+
+## Scaling
+
+The deployment uses HPA with CPU and memory targets.
+Current settings:
+- Min replicas: {{ .Values.autoscaling.minReplicas }}
+- Max replicas: {{ .Values.autoscaling.maxReplicas }}
+- Target CPU: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}%
+- Target Memory: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}%

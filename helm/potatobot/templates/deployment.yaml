@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "potatobot.fullname" . }}
+  labels:
+    {{- include "potatobot.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "potatobot.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "potatobot.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "potatobot.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "potatobot.fullname" . }}-secrets
+                  key: bot-token
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "potatobot.fullname" . }}-secrets
+                  key: database-url
+            - name: REDIS_URL
+              value: {{ .Values.bot.redisUrl | quote }}
+            - name: WEB_HOST
+              value: {{ .Values.bot.webHost | quote }}
+            - name: WEB_PORT
+              value: {{ .Values.bot.webPort | quote }}
+            - name: DIG_COOLDOWN_SECONDS
+              value: {{ .Values.bot.digCooldownSeconds | quote }}
+            - name: DIG_MIN_KG
+              value: {{ .Values.bot.digMinKg | quote }}
+            - name: DIG_MAX_KG
+              value: {{ .Values.bot.digMaxKg | quote }}
+            - name: DIG_PRECISION
+              value: {{ .Values.bot.digPrecision | quote }}
+            - name: DAILY_BONUS_ENABLED
+              value: {{ .Values.bot.dailyBonusEnabled | quote }}
+            - name: DAILY_BONUS_BASE_KG
+              value: {{ .Values.bot.dailyBonusBaseKg | quote }}
+            - name: DAILY_BONUS_STREAK_MULTIPLIER
+              value: {{ .Values.bot.dailyBonusStreakMultiplier | quote }}
+            - name: DAILY_BONUS_MAX_STREAK
+              value: {{ .Values.bot.dailyBonusMaxStreak | quote }}
+            - name: ACHIEVEMENTS_ENABLED
+              value: {{ .Values.bot.achievementsEnabled | quote }}
+            - name: ANTICHEAT_ENABLED
+              value: {{ .Values.bot.anticheatEnabled | quote }}
+            - name: ANTICHEAT_MAX_KG_PER_HOUR
+              value: {{ .Values.bot.anticheatMaxKgPerHour | quote }}
+            - name: ANTICHEAT_MIN_DIG_INTERVAL
+              value: {{ .Values.bot.anticheatMinDigInterval | quote }}
+            - name: ADMIN_USER_IDS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "potatobot.fullname" . }}-secrets
+                  key: admin-user-ids
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "potatobot.fullname" . }}-secrets
+                  key: sentry-dsn
+            - name: SENTRY_TRACES_SAMPLE_RATE
+              value: {{ .Values.bot.sentryTracesSampleRate | quote }}
+            - name: SENTRY_PROFILES_SAMPLE_RATE
+              value: {{ .Values.bot.sentryProfilesSampleRate | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.bot.logLevel | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.bot.logFormat | quote }}
+            - name: ADMIN_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "potatobot.fullname" . }}-secrets
+                  key: admin-session-secret
+            - name: PYTHONPATH
+              value: "/app"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
