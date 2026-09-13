@@ -1,0 +1,202 @@
+# Default values for potatobot
+# This is a YAML-formatted file.
+
+replicaCount: 2
+
+image:
+  repository: potatobot
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: potatobot.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: potatobot-tls
+      hosts:
+        - potatobot.example.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Bot configuration
+bot:
+  # BOT_TOKEN should be set via secret
+  token: ""
+  # Database URL should be set via secret
+  databaseUrl: ""
+  # Redis URL
+  redisUrl: "redis://redis-master:6379/0"
+  # Web settings
+  webHost: "0.0.0.0"
+  webPort: 8080
+  # Game settings
+  digCooldownSeconds: 3600
+  digMinKg: 1.0
+  digMaxKg: 7.0
+  digPrecision: 1
+  # Daily bonus
+  dailyBonusEnabled: true
+  dailyBonusBaseKg: 0.5
+  dailyBonusStreakMultiplier: 0.1
+  dailyBonusMaxStreak: 30
+  # Achievements
+  achievementsEnabled: true
+  # Anti-cheat
+  anticheatEnabled: true
+  anticheatMaxKgPerHour: 50.0
+  anticheatMinDigInterval: 0.5
+  # Admin users (comma-separated Telegram IDs)
+  adminUserIds: ""
+  # Sentry
+  sentryDsn: ""
+  sentryTracesSampleRate: 0.1
+  sentryProfilesSampleRate: 0.1
+  # Logging
+  logLevel: "INFO"
+  logFormat: "json"
+
+# Redis configuration (using bitnami/redis chart)
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+# PostgreSQL configuration (using bitnami/postgresql chart)
+postgresql:
+  enabled: true
+  auth:
+    username: potatobot
+    database: potatobot
+    # password should be set via secret
+    password: ""
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+# Prometheus monitoring
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    namespace: monitoring
+  prometheusRule:
+    enabled: true
+    namespace: monitoring
+
+# Secrets (will be created if not exist)
+secrets:
+  botToken: ""
+  databaseUrl: ""
+  postgresPassword: ""
+  sentryDsn: ""
+  adminSessionSecret: "changeme_please_use_strong_secret"
+
+# Network policies
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+
+# Pod disruption budget
+pdb:
+  enabled: true
+  minAvailable: 1
+
+# Liveness and readiness probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 40
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3

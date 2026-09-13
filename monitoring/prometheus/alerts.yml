@@ -1,0 +1,116 @@
+groups:
+  - name: potatobot.rules
+    interval: 30s
+    rules:
+      # Bot availability
+      - alert: PotatobotDown
+        expr: up{job="potatobot"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Potatobot is down"
+          description: "Potatobot has been down for more than 1 minute"
+
+      # High error rate
+      - alert: PotatobotHighErrorRate
+        expr: |
+          sum(rate(potatobot_errors_total[5m])) by (type, handler)
+          / sum(rate(potatobot_dig_commands_total[5m])) by (type, handler) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate in {{ $labels.handler }}"
+          description: "Error rate for {{ $labels.handler }} is above 5%"
+
+      # Database connection issues
+      - alert: PotatobotDBConnectionFailed
+        expr: potatobot_db_query_errors_total > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database query errors detected"
+          description: "{{ $value }} database errors in the last minute"
+
+      # Database pool exhaustion
+      - alert: PotatobotDBPoolExhausted
+        expr: potatobot_db_pool_usage{state="used"} / (potatobot_db_pool_usage{state="used"} + potatobot_db_pool_usage{state="idle"}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Pool usage is above 90%"
+
+      # Low cache hit rate
+      - alert: PotatobotLowCacheHitRate
+        expr: |
+          sum(rate(potatobot_cache_misses_total[5m])) / (sum(rate(potatobot_cache_hits_total[5m])) + sum(rate(potatobot_cache_misses_total[5m]))) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is below 70%"
+
+      # High latency
+      - alert: PotatobotHighDigLatency
+        expr: histogram_quantile(0.95, sum(rate(potatobot_db_query_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database query latency"
+          description: "95th percentile DB query latency is above 1 second"
+
+      # No active users (DAU drop)
+      - alert: PotatobotLowDAU
+        expr: potatobot_active_users_daily < 10
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low daily active users"
+          description: "DAU dropped below 10"
+
+      # Retention drop
+      - alert: PotatobotLowRetention
+        expr: potatobot_retention_day1 < 20
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low Day 1 retention"
+          description: "Day 1 retention dropped below 20%"
+
+      # Redis memory usage
+      - alert: PotatobotRedisHighMemory
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis memory usage is above 85%"
+
+      # Daily bonus not working
+      - alert: PotatobotDailyBonusStuck
+        expr: rate(potatobot_daily_bonus_claims_total{status="success"}[1h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No daily bonus claims in 2 hours"
+          description: "Daily bonus system might be stuck"
+
+      # Achievements not unlocking
+      - alert: PotatobotAchievementsStuck
+        expr: rate(potatobot_achievements_unlocked_total[1h]) == 0
+        for: 4h
+        labels:
+          severity: info
+        annotations:
+          summary: "No achievements unlocked in 4 hours"
+          description: "Achievement system might not be working"

@@ -44,6 +44,33 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", validation_alias="LOG_LEVEL")
     log_format: str = Field("json", validation_alias="LOG_FORMAT")
 
+    # Redis
+    redis_url: str = Field("redis://localhost:6379/0", validation_alias="REDIS_URL")
+    redis_max_connections: int = Field(50, validation_alias="REDIS_MAX_CONNECTIONS")
+
+    # Sentry
+    sentry_dsn: str | None = Field(None, validation_alias="SENTRY_DSN")
+    sentry_traces_sample_rate: float = Field(0.1, validation_alias="SENTRY_TRACES_SAMPLE_RATE")
+    sentry_profiles_sample_rate: float = Field(0.1, validation_alias="SENTRY_PROFILES_SAMPLE_RATE")
+
+    # Admin panel
+    admin_user_ids: str = Field("", validation_alias="ADMIN_USER_IDS")  # comma-separated
+    admin_session_secret: str = Field("changeme", validation_alias="ADMIN_SESSION_SECRET")
+
+    # Daily bonus
+    daily_bonus_enabled: bool = Field(True, validation_alias="DAILY_BONUS_ENABLED")
+    daily_bonus_base_kg: float = Field(0.5, validation_alias="DAILY_BONUS_BASE_KG")
+    daily_bonus_streak_multiplier: float = Field(0.1, validation_alias="DAILY_BONUS_STREAK_MULTIPLIER")
+    daily_bonus_max_streak: int = Field(30, validation_alias="DAILY_BONUS_MAX_STREAK")
+
+    # Achievements
+    achievements_enabled: bool = Field(True, validation_alias="ACHIEVEMENTS_ENABLED")
+
+    # Anti-cheat
+    anticheat_enabled: bool = Field(True, validation_alias="ANTICHEAT_ENABLED")
+    anticheat_max_kg_per_hour: float = Field(50.0, validation_alias="ANTICHEAT_MAX_KG_PER_HOUR")
+    anticheat_min_dig_interval: float = Field(0.5, validation_alias="ANTICHEAT_MIN_DIG_INTERVAL")
+
     @field_validator("bot_token")
     @classmethod
     def validate_bot_token(cls, v: str) -> str:
@@ -59,6 +86,12 @@ class Settings(BaseSettings):
         if "sslmode=" not in v:
             return v + ("&" if "?" in v else "?") + "sslmode=require"
         return v
+
+    @property
+    def admin_ids(self) -> list[int]:
+        if not self.admin_user_ids:
+            return []
+        return [int(x.strip()) for x in self.admin_user_ids.split(",") if x.strip().isdigit()]
 
 
 @lru_cache

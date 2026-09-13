@@ -1,5 +1,7 @@
 """Database connection and models."""
 
+from __future__ import annotations
+
 import asyncpg
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
