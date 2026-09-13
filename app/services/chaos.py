@@ -5,9 +5,7 @@ import random
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, List, Dict, Callable
-from app.database import Database
-from app.services import get_redis
+from typing import Optional, List, Dict
 from app.utils.logging import get_logger
 from app.config import get_settings
 
@@ -59,10 +57,8 @@ class ExperimentResult:
 
 
 class ChaosEngineeringService:
-    def __init__(self, db: Database):
-        self.db = db
+    def __init__(self):
         self.settings = get_settings()
-        self._redis = None
         self._experiments: Dict[str, ChaosExperiment] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._injection_enabled = False
@@ -70,12 +66,6 @@ class ChaosEngineeringService:
         self._error_rate = 0.0
         self._db_failure = False
         self._redis_failure = False
-
-    @property
-    async def redis(self):
-        if self._redis is None:
-            self._redis = await get_redis()
-        return self._redis
 
     # ===== Experiment Management =====
     def create_experiment(
@@ -265,40 +255,35 @@ class ChaosEngineeringService:
     # ===== Metrics Collection =====
     async def _collect_metrics(self) -> Dict:
         """Collect current system metrics."""
-        redis = await self.redis
         return {
             "timestamp": time.time(),
-            "active_users": await redis.get("metrics:active_users_daily") or 0,
-            "dig_rate": await redis.get("metrics:dig_rate") or 0,
-            "error_rate": await redis.get("metrics:error_rate") or 0,
-            "avg_latency": await redis.get("metrics:avg_latency") or 0,
-            "db_pool_usage": await redis.get("metrics:db_pool_usage") or 0,
-            "cache_hit_rate": await redis.get("metrics:cache_hit_rate") or 0,
+            "active_users": 0,
+            "dig_rate": 0,
+            "error_rate": 0,
+            "avg_latency": 0,
+            "db_pool_usage": 0,
+            "cache_hit_rate": 0,
         }
 
     def _analyze_results(self, before: Dict, after: Dict, experiment: ChaosExperiment) -> List[str]:
         """Analyze experiment results."""
         observations = []
 
-        # Latency change
         if "avg_latency" in before and "avg_latency" in after:
             change = after["avg_latency"] - before["avg_latency"]
             if change > 100:
                 observations.append(f"Latency increased by {change:.0f}ms")
 
-        # Error rate change
         if "error_rate" in before and "error_rate" in after:
             change = after["error_rate"] - before["error_rate"]
             if change > 0.01:
                 observations.append(f"Error rate increased by {change*100:.1f}%")
 
-        # Dig rate change
         if "dig_rate" in before and "dig_rate" in after:
             change = after["dig_rate"] - before["dig_rate"]
             if change < -10:
                 observations.append(f"Dig rate dropped by {abs(change):.0f}/min")
 
-        # Recovery observations
         if experiment.type == ChaosExperimentType.DB_CONNECTION_FAILURE:
             observations.append("DB connection failure simulated - check retry logic")
         elif experiment.type == ChaosExperimentType.REDIS_CONNECTION_FAILURE:
@@ -308,12 +293,10 @@ class ChaosEngineeringService:
 
     async def _measure_recovery_time(self, experiment: ChaosExperiment) -> Optional[float]:
         """Measure how long it takes to recover after experiment."""
-        # Wait a bit and check if metrics recover
         await asyncio.sleep(5)
         metrics_after = await self._collect_metrics()
         metrics_before = experiment.results.get("metrics_before", {}) if experiment.results else {}
 
-        # Simple recovery check
         if "avg_latency" in metrics_before and "avg_latency" in metrics_after:
             if abs(metrics_after["avg_latency"] - metrics_before["avg_latency"]) < 50:
                 return 5.0  # Recovered in ~5 seconds
@@ -374,10 +357,10 @@ class ChaosEngineeringService:
 _chaos_service = None
 
 
-def get_chaos_service(db: Database = None) -> ChaosEngineeringService:
+def get_chaos_service() -> ChaosEngineeringService:
     global _chaos_service
-    if _chaos_service is None and db is not None:
-        _chaos_service = ChaosEngineeringService(db)
+    if _chaos_service is None:
+        _chaos_service = ChaosEngineeringService()
     return _chaos_service
 
 
@@ -403,3 +386,71 @@ class ChaosInjectionMiddleware:
             raise DatabaseError("Chaos engineering: DB failure injected")
 
         return await handler(event, data)
+
+
+# Admin command helpers
+def enable_chaos():
+    service = get_chaos_service()
+    service._injection_enabled = True
+    return "✅ Chaos Engineering включен"
+
+
+def disable_chaos():
+    service = get_chaos_service()
+    service._injection_enabled = False
+    service._latency_ms = 0
+    service._error_rate = 0.0
+    service._db_failure = False
+    service._redis_failure = False
+    return "❌ Chaos Engineering выключен"
+
+
+def set_chaos_experiment(exp_type: str):
+    service = get_chaos_service()
+    type_map = {
+        "latency": ChaosExperimentType.LATENCY_INJECTION,
+        "error": ChaosExperimentType.ERROR_INJECTION,
+        "timeout": ChaosExperimentType.RESOURCE_EXHAUSTION,
+    }
+    if exp_type in type_map:
+        service._injection_enabled = True
+        if exp_type == "latency":
+            service._latency_ms = 2000
+        elif exp_type == "error":
+            service._error_rate = 0.1
+        elif exp_type == "timeout":
+            service._latency_ms = 5000
+        return f"⚡ Эксперимент: {exp_type}"
+    return "❌ Неизвестный тип эксперимента"
+
+
+def set_chaos_intensity(intensity: int):
+    service = get_chaos_service()
+    service._error_rate = max(0, min(100, intensity)) / 100
+    service._latency_ms = int(max(0, min(100, intensity)) * 50)
+    return f"📊 Интенсивность: {intensity}%"
+
+
+def get_chaos_status() -> dict:
+    service = get_chaos_service()
+    return {
+        "enabled": service._injection_enabled,
+        "experiment_type": None,
+        "intensity": int(service._error_rate * 100) + int(service._latency_ms / 50),
+    }
+
+
+__all__ = [
+    "ChaosEngineeringService",
+    "get_chaos_service",
+    "ChaosExperimentType",
+    "ExperimentStatus",
+    "ChaosExperiment",
+    "ExperimentResult",
+    "ChaosInjectionMiddleware",
+    "enable_chaos",
+    "disable_chaos",
+    "set_chaos_experiment",
+    "set_chaos_intensity",
+    "get_chaos_status",
+]

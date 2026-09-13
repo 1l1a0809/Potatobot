@@ -1,36 +1,91 @@
 """Services package."""
 
-from app.services.user_service import UserService
-from app.services.dig_service import DigService
-from app.services.cleanup_service import CleanupService
-from app.services.redis_service import RedisService, get_redis, close_redis
-from app.services.daily_bonus_service import DailyBonusService, get_daily_bonus_service
-from app.services.achievement_service import AchievementService, get_achievement_service, Achievement
-from app.services.metrics_service import MetricsService, get_metrics_service
-from app.services.clan_service import ClanService, get_clan_service
-from app.services.ml_recommendation_service import MLRecommendationService, get_ml_service
-from app.services.chaos_engineering_service import ChaosEngineeringService, get_chaos_service, ChaosInjectionMiddleware, ChaosExperimentType
+# Core services
+from app.services.core import (
+    UserService,
+    DigService,
+    DailyBonusService,
+    CleanupService,
+    RedisService,
+    get_dig_service,
+    get_daily_bonus_service,
+    get_cleanup_service,
+    get_redis,
+    close_redis,
+)
+
+# Feature services
+from app.services.features import (
+    AchievementService,
+    get_achievement_service,
+    Achievement,
+    ClanService,
+    get_clan_service,
+    Clan,
+    ClanMember,
+    ClanInvite,
+    MetricsService,
+    get_metrics_service,
+    MLRecommendationService,
+    get_ml_service,
+    UserProfile,
+    Recommendation,
+)
+
+# Chaos engineering
+from app.services.chaos import (
+    ChaosEngineeringService,
+    get_chaos_service,
+    ChaosExperimentType,
+    ExperimentStatus,
+    ChaosExperiment,
+    ExperimentResult,
+    ChaosInjectionMiddleware,
+    enable_chaos,
+    disable_chaos,
+    set_chaos_experiment,
+    set_chaos_intensity,
+    get_chaos_status,
+)
 
 __all__ = [
+    # Core
     "UserService",
     "DigService",
+    "DailyBonusService",
     "CleanupService",
     "RedisService",
+    "get_dig_service",
+    "get_daily_bonus_service",
+    "get_cleanup_service",
     "get_redis",
     "close_redis",
-    "DailyBonusService",
-    "get_daily_bonus_service",
+    # Features
     "AchievementService",
     "get_achievement_service",
     "Achievement",
-    "MetricsService",
-    "get_metrics_service",
     "ClanService",
     "get_clan_service",
+    "Clan",
+    "ClanMember",
+    "ClanInvite",
+    "MetricsService",
+    "get_metrics_service",
     "MLRecommendationService",
     "get_ml_service",
+    "UserProfile",
+    "Recommendation",
+    # Chaos
     "ChaosEngineeringService",
     "get_chaos_service",
-    "ChaosInjectionMiddleware",
     "ChaosExperimentType",
+    "ExperimentStatus",
+    "ChaosExperiment",
+    "ExperimentResult",
+    "ChaosInjectionMiddleware",
+    "enable_chaos",
+    "disable_chaos",
+    "set_chaos_experiment",
+    "set_chaos_intensity",
+    "get_chaos_status",
 ]

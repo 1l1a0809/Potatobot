@@ -5,11 +5,9 @@ from aiohttp import web
 import aiohttp_jinja2
 import jinja2
 
-from app.web.health import setup_health
-from app.web.metrics import setup_metrics
+from app.web.routes import setup_routes
 from app.web.admin import setup_admin
-from app.web.api import setup_api
-from app.services import get_achievement_service
+from app.services.achievement_service import get_achievement_service
 
 
 def datetime_filter(value):
@@ -50,10 +48,9 @@ async def create_web_app(db, redis, settings, bot=None) -> web.Application:
     # Override the route
     app.router.add_get("/admin/users/{user_id}", admin_user_detail_with_achievements)
 
-    setup_health(app)
-    setup_metrics(app)
+    # Setup all routes
+    setup_routes(app)
     setup_admin(app)
-    setup_api(app)
 
     return app
 
@@ -64,3 +61,9 @@ async def run_web_server(app: web.Application, host: str, port: int):
     site = web.TCPSite(runner, host, port)
     await site.start()
     return runner
+
+
+__all__ = [
+    "create_web_app",
+    "run_web_server",
+]

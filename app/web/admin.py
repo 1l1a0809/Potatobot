@@ -3,7 +3,7 @@
 import time
 from aiohttp import web
 import aiohttp_jinja2
-from app.services import get_redis
+from app.services.redis_service import get_redis
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)

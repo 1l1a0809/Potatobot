@@ -10,12 +10,13 @@ from sentry_sdk.integrations.logging import LoggingIntegration
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 
 from app.config import get_settings
 from app.database import Database, init_database
 from app.services import (
-    DigService,
-    CleanupService,
+    get_dig_service,
+    get_cleanup_service,
     get_redis,
     close_redis,
     get_daily_bonus_service,
@@ -23,8 +24,9 @@ from app.services import (
     get_metrics_service,
     get_clan_service,
     get_ml_service,
+    get_chaos_service,
 )
-from app.handlers import basic_router, dig_router, stats_router, webapp_router, inline_router, clan_router, ml_recommendations_router, chaos_router
+from app.handlers import commands_router, features_router
 from app.middleware import RateLimitMiddleware, ErrorHandlingMiddleware, LoggingMiddleware
 from app.web import create_web_app, run_web_server
 from app.utils.logging import setup_logging, get_logger
@@ -82,21 +84,25 @@ async def main():
     logger.info("database_connected")
 
     # Initialize services
-    dig_service = DigService(db)
-    cleanup_service = CleanupService(db)
+    dig_service = get_dig_service()
+    dig_service.db = db
+
+    cleanup_service = get_cleanup_service(db)
     await cleanup_service.start()
 
     metrics_service = get_metrics_service(db)
     await metrics_service.start()
 
-clan_service = get_clan_service(db)
+    clan_service = get_clan_service(db)
 
     ml_service = get_ml_service(db)
 
     daily_bonus_service = get_daily_bonus_service()
-    daily_bonus_service.db = db  # Inject db
+    daily_bonus_service.db = db
 
     achievement_service = get_achievement_service()
+
+    chaos_service = get_chaos_service()
 
     # Initialize bot
     bot = Bot(
@@ -115,35 +121,34 @@ clan_service = get_clan_service(db)
     dp = Dispatcher()
 
     # Register middlewares (order matters!)
+    dp.message.middleware(ErrorHandlingMiddleware())
+    dp.message.middleware(LoggingMiddleware())
+    dp.message.middleware(RateLimitMiddleware())
 
     # Register handlers
-    dp.include_router(basic_router)
-    dp.include_router(dig_router)
-    dp.include_router(stats_router)
-    dp.include_router(webapp_router)
-    dp.include_router(inline_router)
-    dp.include_router(clan_router)
-    dp.include_router(ml_recommendations_router)
-    dp.include_router(chaos_router)
+    dp.include_router(commands_router)
+    dp.include_router(features_router)
 
     # Set bot commands
     await bot.set_my_commands([
-        ("start", "🏁 Начать / перезапустить"),
-        ("dig", "🥔 Выкопать картошку"),
-        ("my_stats", "📊 Моя статистика"),
-        ("my_history", "📜 История копок"),
-        ("top_day", "🏆 Топ за сутки"),
-        ("top_all", "🏆 Общий топ"),
-        ("daily", "🎁 Ежедневный бонус"),
-        ("achievements", "🏅 Достижения"),
-        ("app", "🌐 Веб-приложение"),
-        ("clan", "🏷 Мой клан"),
-        ("clan_create", "🏷 Создать клан"),
-        ("clan_invite", "📨 Пригласить в клан"),
-        ("clan_invites", "📨 Входящие приглашения"),
-        ("clan_top", "🏆 Топ кланов"),
-        ("clan_transfer", "👑 Передать владение кланом"),
-        ("help", "❓ Помощь"),
+        BotCommand(command="start", description="🏁 Начать / перезапустить"),
+        BotCommand(command="dig", description="🥔 Выкопать картошку"),
+        BotCommand(command="my_stats", description="📊 Моя статистика"),
+        BotCommand(command="my_history", description="📜 История копок"),
+        BotCommand(command="top_day", description="🏆 Топ за сутки"),
+        BotCommand(command="top_all", description="🏆 Общий топ"),
+        BotCommand(command="daily", description="🎁 Ежедневный бонус"),
+        BotCommand(command="achievements", description="🏅 Достижения"),
+        BotCommand(command="app", description="🌐 Веб-приложение"),
+        BotCommand(command="clan", description="🏷 Мой клан"),
+        BotCommand(command="clan_create", description="🏷 Создать клан"),
+        BotCommand(command="clan_invite", description="📨 Пригласить в клан"),
+        BotCommand(command="clan_invites", description="📨 Входящие приглашения"),
+        BotCommand(command="clan_top", description="🏆 Топ кланов"),
+        BotCommand(command="clan_transfer", description="👑 Передать владение кланом"),
+        BotCommand(command="help", description="❓ Помощь"),
+        BotCommand(command="recommend", description="🤖 Рекомендации"),
+        BotCommand(command="chaos", description="🧪 Chaos Engineering (admin)"),
     ])
 
     # Start web server
